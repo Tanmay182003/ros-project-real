@@ -12,26 +12,21 @@ AZURE_REGION = "eastus"
 
 # Command → (vel_left, vel_right)
 COMMANDS = {
-    "forward":  ( 0.2,  0.2),
     "go":       ( 0.2,  0.2),
-    "straight": ( 0.2,  0.2),
-    "backward": (-0.2, -0.2),
     "back":     (-0.2, -0.2),
-    "reverse":  (-0.2, -0.2),
     "stop":     ( 0.0,  0.0),
-    "halt":     ( 0.0,  0.0),
 }
 
 # Turn commands: (vel_left, vel_right, duration) during turn, then burst forward
 TURN_COMMANDS = {
-    "left":   (-0.3,  0.3,  1.0),
+    "left":   (-0.3,  0.3,  0.5),
     "right":  ( 0.3, -0.3,  0.5),
 }
 
 # Slight turn commands: (vel_left, vel_right, duration) — adjust only, then stop
 SLIGHT_COMMANDS = {
-    "sloth":  (-0.1,  0.1, 0.3),
-    "brick":  ( 0.1, -0.1, 0.3),
+    "sloth":  (-0.1,  0.1, 0.0),
+    "brick":  ( 0.1, -0.1, 0.0),
 }
 
 ALL_KEYWORDS = list(COMMANDS.keys()) + list(TURN_COMMANDS.keys()) + list(SLIGHT_COMMANDS.keys())
