@@ -53,8 +53,10 @@ class VoiceControlNode(DTROS):
         self._vel_left = 0.0
         self._vel_right = 0.0
 
-        # Track last acted-on command to avoid duplicates
+        # Track last acted-on command to avoid duplicates (protected by _lock)
         self._last_partial_cmd = None
+        self._cancel_event = threading.Event()
+        self._active_thread = None
 
         # Azure Speech config — tuned for lowest latency
         speech_config = speechsdk.SpeechConfig(subscription=AZURE_KEY, region=AZURE_REGION)
@@ -93,63 +95,108 @@ class VoiceControlNode(DTROS):
         with self._lock:
             return self._vel_left, self._vel_right
 
+    def _start_command_thread(self, keyword, target, args=()):
+        """Cancel any active command thread and start a new one.
+        Must be called WITHOUT self._lock held to avoid deadlock."""
+        self._cancel_event.set()
+        if self._active_thread and self._active_thread.is_alive():
+            self._active_thread.join(timeout=1.0)
+        self._cancel_event.clear()
+        with self._lock:
+            self._last_partial_cmd = keyword
+        t = threading.Thread(target=target, args=args, daemon=True)
+        self._active_thread = t
+        t.start()
+
     def _handle_text(self, text):
         text = text.strip().lower().rstrip(".")
         if not text:
             return
         words = text.split()
-        # Check slight adjustments first
-        for keyword, (vl, vr, dur) in SLIGHT_COMMANDS.items():
-            if keyword in words and self._last_partial_cmd != keyword:
-                self._last_partial_cmd = keyword
-                threading.Thread(target=self._slight_adjust, args=(keyword, vl, vr, dur), daemon=True).start()
-                return
-        # Check turn commands
-        for keyword, (vl, vr, dur) in TURN_COMMANDS.items():
-            if keyword in words and self._last_partial_cmd != keyword:
-                self._last_partial_cmd = keyword
-                threading.Thread(target=self._turn, args=(keyword, vl, vr, dur), daemon=True).start()
-                return
-        for keyword, (vl, vr) in COMMANDS.items():
-            if keyword in words and self._last_partial_cmd != keyword:
-                self._last_partial_cmd = keyword
-                if keyword in ("forward", "go", "straight"):
-                    threading.Thread(target=self._burst_forward, daemon=True).start()
-                elif keyword in ("backward", "back", "reverse"):
-                    threading.Thread(target=self._burst_backward, daemon=True).start()
-                else:
-                    rospy.loginfo(f"Command: {keyword} -> vel_left={vl}, vel_right={vr}")
-                    self._set_velocity(vl, vr)
-                return
+
+        # Determine action under lock, but don't start threads while holding it
+        with self._lock:
+            action = None
+            # Check slight adjustments first
+            for keyword, (vl, vr, dur) in SLIGHT_COMMANDS.items():
+                if keyword in words and self._last_partial_cmd != keyword:
+                    action = ("slight", keyword, vl, vr, dur)
+                    break
+            # Check turn commands
+            if action is None:
+                for keyword, (vl, vr, dur) in TURN_COMMANDS.items():
+                    if keyword in words and self._last_partial_cmd != keyword:
+                        action = ("turn", keyword, vl, vr, dur)
+                        break
+            if action is None:
+                for keyword, (vl, vr) in COMMANDS.items():
+                    if keyword in words and self._last_partial_cmd != keyword:
+                        if keyword == "go":
+                            action = ("burst_forward",)
+                        elif keyword == "back":
+                            action = ("burst_backward",)
+                        else:
+                            rospy.loginfo(f"Command: {keyword} -> vel_left={vl}, vel_right={vr}")
+                            self._last_partial_cmd = keyword
+                            self._vel_left = vl
+                            self._vel_right = vr
+                        break
+
+        # Execute action outside the lock
+        if action is None:
+            return
+        if action[0] == "slight":
+            _, keyword, vl, vr, dur = action
+            self._start_command_thread(keyword, self._slight_adjust, (keyword, vl, vr, dur))
+        elif action[0] == "turn":
+            _, keyword, vl, vr, dur = action
+            self._start_command_thread(keyword, self._turn, (keyword, vl, vr, dur))
+        elif action[0] == "burst_forward":
+            self._start_command_thread("go", self._burst_forward)
+        elif action[0] == "burst_backward":
+            self._start_command_thread("back", self._burst_backward)
+
+    def _cancellable_sleep(self, duration):
+        """Sleep for duration, but return early (True) if cancelled."""
+        return self._cancel_event.wait(timeout=duration)
+
+    def _clear_cmd(self):
+        with self._lock:
+            self._last_partial_cmd = None
 
     def _burst_forward(self):
         rospy.loginfo(f"BURST forward for {BURST_DURATION}s")
         self._set_velocity(BURST_SPEED, BURST_SPEED)
-        rospy.sleep(BURST_DURATION)
+        if self._cancellable_sleep(BURST_DURATION):
+            return
         rospy.loginfo("BURST complete, stopping.")
         self._set_velocity(0.0, 0.0)
-        self._last_partial_cmd = None
+        self._clear_cmd()
 
     def _burst_backward(self):
         rospy.loginfo(f"BURST backward for {BURST_DURATION}s")
         self._set_velocity(-BURST_SPEED, -BURST_SPEED)
-        rospy.sleep(BURST_DURATION)
+        if self._cancellable_sleep(BURST_DURATION):
+            return
         rospy.loginfo("BURST complete, stopping.")
         self._set_velocity(0.0, 0.0)
-        self._last_partial_cmd = None
+        self._clear_cmd()
 
     def _turn(self, keyword, vl, vr, duration):
         rospy.loginfo(f"Command: {keyword} -> turning for {duration}s")
         self._set_velocity(vl, vr)
-        rospy.sleep(duration)
-        self._set_velocity(vl, vr)
+        if self._cancellable_sleep(duration):
+            return
+        self._set_velocity(0.0, 0.0)
+        self._clear_cmd()
 
     def _slight_adjust(self, keyword, vl, vr, duration):
         rospy.loginfo(f"Command: {keyword} -> slight adjust for {duration}s")
         self._set_velocity(vl, vr)
-        rospy.sleep(duration)
+        if self._cancellable_sleep(duration):
+            return
         self._set_velocity(0.0, 0.0)
-        self._last_partial_cmd = None
+        self._clear_cmd()
 
     def _on_recognizing(self, evt):
         self._handle_text(evt.result.text)
@@ -159,7 +206,7 @@ class VoiceControlNode(DTROS):
             text = evt.result.text.strip().lower().rstrip(".")
             if text:
                 rospy.loginfo(f"FINAL: '{text}'")
-                self._last_partial_cmd = None
+                self._clear_cmd()
         elif evt.result.reason == speechsdk.ResultReason.NoMatch:
             rospy.logwarn(f"NO MATCH: {evt.result.no_match_details.reason}")
 
