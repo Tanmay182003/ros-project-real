@@ -25,8 +25,8 @@ TURN_COMMANDS = {
 
 # Slight turn commands: (vel_left, vel_right, duration) — adjust only, then stop
 SLIGHT_COMMANDS = {
-    "sloth":  (-0.1,  0.1, 0.0),
-    "brick":  ( 0.1, -0.1, 0.0),
+    "sloth":  (-0.1,  0.1, 0.2),
+    "brick":  ( 0.1, -0.1, 0.2),
 }
 
 ALL_KEYWORDS = list(COMMANDS.keys()) + list(TURN_COMMANDS.keys()) + list(SLIGHT_COMMANDS.keys())
@@ -108,7 +108,7 @@ class VoiceControlNode(DTROS):
         for keyword, (vl, vr, dur) in TURN_COMMANDS.items():
             if keyword in words and self._last_partial_cmd != keyword:
                 self._last_partial_cmd = keyword
-                threading.Thread(target=self._turn_then_forward, args=(keyword, vl, vr, dur), daemon=True).start()
+                threading.Thread(target=self._turn, args=(keyword, vl, vr, dur), daemon=True).start()
                 return
         for keyword, (vl, vr) in COMMANDS.items():
             if keyword in words and self._last_partial_cmd != keyword:
@@ -138,11 +138,11 @@ class VoiceControlNode(DTROS):
         self._set_velocity(0.0, 0.0)
         self._last_partial_cmd = None
 
-    def _turn_then_forward(self, keyword, vl, vr, duration):
-        rospy.loginfo(f"Command: {keyword} -> turning for {duration}s then burst forward")
+    def _turn(self, keyword, vl, vr, duration):
+        rospy.loginfo(f"Command: {keyword} -> turning for {duration}s")
         self._set_velocity(vl, vr)
         rospy.sleep(duration)
-        self._burst_forward()
+        self._set_velocity(vl, vr)
 
     def _slight_adjust(self, keyword, vl, vr, duration):
         rospy.loginfo(f"Command: {keyword} -> slight adjust for {duration}s")
