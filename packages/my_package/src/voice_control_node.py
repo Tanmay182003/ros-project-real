@@ -25,14 +25,14 @@ TURN_COMMANDS = {
 
 # Slight turn commands: (vel_left, vel_right, duration) — adjust only, then stop
 SLIGHT_COMMANDS = {
-    "sloth":  (-0.1,  0.1, 0.2),
-    "brick":  ( 0.1, -0.1, 0.2),
+    "sloth":  (-0.1,  0.1, 0.3),
+    "brick":  ( 0.1, -0.1, 0.3),
 }
 
 ALL_KEYWORDS = list(COMMANDS.keys()) + list(TURN_COMMANDS.keys()) + list(SLIGHT_COMMANDS.keys())
 
 BURST_SPEED = 0.4   # fast burst speed
-BURST_DURATION = 2.5 # seconds to go before auto-stopping
+BURST_DURATION = 2.0 # seconds to go before auto-stopping
 
 PUBLISH_RATE = 10  # Hz
 
