@@ -40,8 +40,13 @@ as you want. A default launcher called `default.sh` must always be present.
 
 If you create an executable script (i.e., a file with a valid shebang statement)
 a launcher will be created for it. For example, the script file 
+
 `/launchers/my-launcher.sh` will be available inside the Docker image as the binary
 `dt-launcher-my-launcher`.
 
 When launching a new container, you can simply provide `dt-launcher-my-launcher` as
 command.
+
+## LLM-Assisted Development
+- **Claude (Opus)**, **GPT**, and **CoPilot** were used as coding assistants throughout development.
+- Their role was limited to **debugging, code suggestions, and implementation assistance** (e.g., fixing control flow bugs, suggesting Python patterns, and helping with API usage).
